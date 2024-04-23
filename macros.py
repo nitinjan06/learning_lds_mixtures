@@ -1,5 +1,5 @@
 from functools import partial
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import numpy as np
 import numpy.linalg as la
 normal = np.random.normal

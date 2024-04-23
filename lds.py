@@ -6,6 +6,7 @@ class LDS:
     B: np.ndarray
     C: np.ndarray
     D: np.ndarray
+    markov_params: list = field(default_factory=list)
     
     def get_observability(self, s):
         return np.concatenate([self.C @ mpow(self.A, i) for i in range(s)])
@@ -19,12 +20,21 @@ class LDS:
         while rank(self.get_observability(self.s)) != self.n: self.s += 1
         while rank(self.get_controllability(self.s)) != self.n: self.s += 1
 
+    def get_markov_param(self, i):
+        # can make this faster
+        while len(self.markov_params) <= i:
+            self.markov_params.append(self.C @ mpow(self.A, len(self.markov_params)-1) @ self.B)
+        
+        return self.markov_params[i]
+
     def __post_init__(self):
         self.n, self.p = self.B.shape
         self.m = self.C.shape[0]
         assert self.A.shape == (self.n, self.n)
         assert self.C.shape == (self.m, self.n)
         assert self.D.shape == (self.m, self.p)
+
+        self.markov_params.append(self.D)
 
         # check individual assumptions
         opA, opB, opC, opD = [op_norm(x) for x in [self.A, self.B, self.C, self.D]]
@@ -39,4 +49,5 @@ class LDS:
         for t in range(length):
             y.append(self.C @ x[t] + self.D @ u[t] + z[t])
             x.append(self.A @ x[t] + self.B @ u[t] + w[t])
-        return u, y
+
+        return u, np.array(y)
