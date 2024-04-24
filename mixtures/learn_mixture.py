@@ -1,4 +1,5 @@
 from macros import *
+from tqdm import tqdm
 
 def get_Pi_M_with_var(trajectories, s):
     Ts = [np.block([[np.outer(np.kron(u[0], y[k1]), np.kron(u[k1+1], y[k1 + k2 + 1])) for k1 in range(2*s+1)] for k2 in range(2*s+1)]) for u, y in trajectories]
@@ -12,19 +13,27 @@ def get_equal_weighted_Pi_M(trajectories, s):
                        np.mean([
                            np.outer(np.kron(y[k1 + k2 + 1], u[k1+1]), np.kron(y[k1], u[0]))
                        for u, y in trajectories], axis=0)
-                   for k1 in range(2*s + 1)] for k2 in range(2*s + 1)])
+                   for k1 in range(2*s + 1)] for k2 in tqdm(range(2*s + 1))])
     return (ans + ans.T)/2 # denoise
+
+def get_random_weighting(m, p):
+    return normal(size=m*p)
 
 def get_random_weighted_Pi_M(trajectories, s, differs_at, random_weighting = None):
     if random_weighting is None:
         u0, y0 = trajectories[0]
-        random_weighting = normal(size=u0.shape[1] * y0.shape[1])
+        random_weighting = get_random_weighting(y0.shape[1], u0.shape[1])
     
+    # ans = np.block([[
+    #                    np.mean([
+    #                        np.outer(np.kron(y[k1 + k2 + 1], u[k1+1]), np.kron(y[k1], u[0])) * np.dot(random_weighting, np.kron(y[k1 + k2 + 2 + differs_at], u[k1 + k2 + 2]))
+    #                    for u, y in trajectories], axis=0)
+    #                for k1 in range(2*s + 1)] for k2 in tqdm(range(2*s + 1))])
     ans = np.block([[
                        np.mean([
-                           np.outer(np.kron(y[k1 + k2 + 1], u[k1+1]), np.kron(y[k1], u[0])) * np.dot(random_weighting, np.kron(y[k1 + k2 + 2 + differs_at], u[k1 + k2 + 2]))
+                           np.outer(np.kron(y[differs_at + k1 + k2 + 2], u[differs_at + k1 + 2]), np.kron(y[differs_at + k1 + 1], u[differs_at + 1])) * np.dot(random_weighting, np.kron(y[differs_at], u[0]))
                        for u, y in trajectories], axis=0)
-                   for k1 in range(2*s + 1)] for k2 in range(2*s + 1)])
+                   for k1 in range(2*s + 1)] for k2 in tqdm(range(2*s + 1))])
     return (ans + ans.T)/2
 
 def extract_components(Pi_M1, Pi_M2, k):
