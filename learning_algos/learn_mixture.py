@@ -1,5 +1,7 @@
 from macros import *
 from tqdm import tqdm
+from lds import LDS
+from learning_algos.learn_single import get_lds_parameters, learn_single_regression
 
 def get_Pi_M_with_var(trajectories, s):
     Ts = [np.block([[np.outer(np.kron(u[0], y[k1]), np.kron(u[k1+1], y[k1 + k2 + 1])) for k1 in range(2*s+1)] for k2 in range(2*s+1)]) for u, y in trajectories]
@@ -24,11 +26,6 @@ def get_random_weighted_Pi_M(trajectories, s, differs_at, random_weighting = Non
         u0, y0 = trajectories[0]
         random_weighting = get_random_weighting(y0.shape[1], u0.shape[1])
     
-    # ans = np.block([[
-    #                    np.mean([
-    #                        np.outer(np.kron(y[k1 + k2 + 1], u[k1+1]), np.kron(y[k1], u[0])) * np.dot(random_weighting, np.kron(y[k1 + k2 + 2 + differs_at], u[k1 + k2 + 2]))
-    #                    for u, y in trajectories], axis=0)
-    #                for k1 in range(2*s + 1)] for k2 in tqdm(range(2*s + 1))])
     ans = np.block([[
                        np.mean([
                            np.outer(np.kron(y[differs_at + k1 + k2 + 2], u[differs_at + k1 + 2]), np.kron(y[differs_at + k1 + 1], u[differs_at + 1])) * np.dot(random_weighting, np.kron(y[differs_at], u[0]))
@@ -64,25 +61,46 @@ def get_weights_and_components(components, R):
 def unflatten_components(components, m, p):
     return components.reshape(components.shape[0], -1, m, p)
 
-def get_lds_parameters(component, m, n, p):
-    component = component.reshape((-1, m, p))
-    D = component[0]
-    s = len(component)//2
+def label_trajectories(samples, lds_list):
+    return np.argmin([[lds_list[i].get_nll(traj) for i in range(2)] for traj in samples], axis = 1)
+
+def em_step(samples, labels, k, s, m, n, p):
+    sorted_samples = [[] for _ in range(k)]
+    for traj, label in zip(samples, labels):
+        sorted_samples[label].append(traj)
+    recovered = [learn_single_regression(sorted_samples[i], s, m, n, p) for i in range(k)]
+    return recovered, label_trajectories(samples, recovered)
+
+
+def learn_with_different_weights(samples_1, samples_2, k, s, m, n, p):
+    Pi_Ms = [get_equal_weighted_Pi_M(samples_1, s), get_equal_weighted_Pi_M(samples_2, s)]
+    pre_components = extract_components(Pi_Ms[0], Pi_Ms[1], k)
+    components = rescale_components(pre_components, Pi_Ms[0])
+    R = get_R(samples_1, s)
+    weights, markov_param_list = get_weights_and_components(components, R)
+    recovered_lds_list = [get_lds_parameters(markov_params, m, n, p) for markov_params in markov_param_list]
+    return weights, recovered_lds_list
+
+def learn_with_random_weighting(samples, k, s, m, n, p, random_weighting, differs_at = 2):
+    Pi_Ms = [get_equal_weighted_Pi_M(samples, s), get_random_weighted_Pi_M(samples, s, differs_at, random_weighting)]
+    pre_components = extract_components(Pi_Ms[0], Pi_Ms[1], k)
+    components = rescale_components(pre_components, Pi_Ms[0])
+    R = get_R(samples, s)
+    weights, markov_param_list = get_weights_and_components(components, R)
+    recovered_lds_list = [LDS(*get_lds_parameters(markov_params, m, n, p)) for markov_params in markov_param_list]
+    return weights, recovered_lds_list
+
+def learn_with_em(samples, k, s, m, n, p, initial_labels = None):
+    labels = initial_labels if initial_labels is not None else np.random.randint(k, size=len(samples))
     
-    # Ho-Kalman
-    H = np.block([[component[i+j+1] for j in range(s+1)] for i in range(s)])
-    H_minus, H_plus = H[:, :p*s], H[:, -p*s:]
-    U, S, Vh = la.svd(H_minus)
-    U, S, Vh = U[:,:n], S[:n], Vh[:n,:]
-    O, Q = U * np.sqrt(S), np.sqrt(S.reshape((-1, 1))) * Vh
-    C, B = O[:m], Q[:,:p]
-    A = la.pinv(O) @ H_plus @ la.pinv(Q)
-    return A, B, C, D
-
-
-# def get_R(trajectories):
-#     return np.mean([np.einsum("j,tk->tkj", u[0], y) for u, y in trajectories], axis=0)
-
-# def adjust_for_weights(G_tilde, R, s):
-#     sqrt_weights, _, _, _ = la.lstsq(G_tilde.reshape((G_tilde.shape[0], -1)).T, R[:2*s+1].flatten())
-#     return [Gi/sqrt_w for Gi, sqrt_w in zip(G_tilde, sqrt_weights)], sqrt_weights**2
+    EM_MAX_STEPS = 100
+    CONVERGENCE_CUTOFF = 0.995
+    similarity = 0
+    for i in range(EM_MAX_STEPS):
+        print(f"on em step: {i+1}/{EM_MAX_STEPS} (last similarity {similarity})")
+        lds_list, new_labels = em_step(samples, labels, k, s, m, n, p)
+        similarity = (labels == new_labels).mean()
+        labels = new_labels
+        if similarity >= CONVERGENCE_CUTOFF: break
+    
+    return new_labels, lds_list
