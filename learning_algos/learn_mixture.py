@@ -78,7 +78,7 @@ def learn_with_different_weights(samples_1, samples_2, k, s, m, n, p):
     components = rescale_components(pre_components, Pi_Ms[0])
     R = get_R(samples_1, s)
     weights, markov_param_list = get_weights_and_components(components, R)
-    recovered_lds_list = [get_lds_parameters(markov_params, m, n, p) for markov_params in markov_param_list]
+    recovered_lds_list = [LDS(*get_lds_parameters(markov_params, m, n, p)) for markov_params in markov_param_list]
     return weights, recovered_lds_list
 
 def learn_with_random_weighting(samples, k, s, m, n, p, random_weighting, differs_at = 2):
@@ -90,17 +90,25 @@ def learn_with_random_weighting(samples, k, s, m, n, p, random_weighting, differ
     recovered_lds_list = [LDS(*get_lds_parameters(markov_params, m, n, p)) for markov_params in markov_param_list]
     return weights, recovered_lds_list
 
+def get_random_labels(k, samples):
+    return np.random.randint(k, size=len(samples))
+
 def learn_with_em(samples, k, s, m, n, p, initial_labels = None):
-    labels = initial_labels if initial_labels is not None else np.random.randint(k, size=len(samples))
-    
-    EM_MAX_STEPS = 100
-    CONVERGENCE_CUTOFF = 0.995
-    similarity = 0
-    for i in range(EM_MAX_STEPS):
-        print(f"on em step: {i+1}/{EM_MAX_STEPS} (last similarity {similarity})")
-        lds_list, new_labels = em_step(samples, labels, k, s, m, n, p)
-        similarity = (labels == new_labels).mean()
-        labels = new_labels
-        if similarity >= CONVERGENCE_CUTOFF: break
-    
-    return new_labels, lds_list
+    labels = initial_labels if initial_labels is not None else get_random_labels(k, samples)
+
+    while True:
+        try:
+            EM_MAX_STEPS = 100
+            CONVERGENCE_CUTOFF = 1
+            for i in range(EM_MAX_STEPS):
+                # print(f"on em step: {i+1}/{EM_MAX_STEPS}")
+                lds_list, new_labels = em_step(samples, labels, k, s, m, n, p)
+                similarity = (labels == new_labels).mean()
+                labels = new_labels
+                # print(f"similarity: {similarity}\n")
+                if similarity >= CONVERGENCE_CUTOFF: break
+            
+            return new_labels, lds_list
+        except:
+            print("all labels were the same, retrying")
+            labels = get_random_labels(k, samples)
